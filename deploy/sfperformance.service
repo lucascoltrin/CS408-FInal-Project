@@ -1,0 +1,14 @@
+[Unit]
+Description=SF Performance (Gunicorn)
+After=network.target postgresql.service
+
+[Service]
+User=__APP_USER__
+Group=__APP_USER__
+WorkingDirectory=/opt/sfperformance
+ExecStart=/opt/sfperformance/venv/bin/gunicorn --workers 3 --bind 127.0.0.1:8000 sfperformance.wsgi:application
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
