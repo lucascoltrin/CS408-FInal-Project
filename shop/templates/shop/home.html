@@ -1,0 +1,33 @@
+{% extends "shop/base.html" %}
+{% block content %}
+<section class="bg-light py-5 border-bottom">
+  <div class="container text-center py-4">
+    <h1 class="display-4 fw-bold">{{ shop.name }}</h1>
+    <p class="lead text-muted">{{ shop.tagline }}</p>
+    <a class="btn btn-dark btn-lg mt-2" href="{% url 'about' %}">About &amp; Contact</a>
+  </div>
+</section>
+
+<section class="container mt-5">
+  <div class="row g-4">
+    <div class="col-md-4">
+      <div class="card h-100"><div class="card-body">
+        <h2 class="h5 card-title">What we do</h2>
+        <p class="card-text">Independent shop specializing in performance modifications and repairs, specifically to euro cars, but will work on anything.</p>
+      </div></div>
+    </div>
+    <div class="col-md-4">
+      <div class="card h-100"><div class="card-body">
+        <h2 class="h5 card-title">Hours</h2>
+        <p class="card-text">{{ shop.hours }}</p>
+      </div></div>
+    </div>
+    <div class="col-md-4">
+      <div class="card h-100"><div class="card-body">
+        <h2 class="h5 card-title">Location</h2>
+        <p class="card-text">{{ shop.location }}</p>
+      </div></div>
+    </div>
+  </div>
+</section>
+{% endblock %}

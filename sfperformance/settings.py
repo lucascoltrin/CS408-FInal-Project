@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -29,11 +30,26 @@ ALLOWED_HOSTS = [
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.auth",
+    "shop",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+]
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "shop.context_processors.shop_info",
+            ],
+        },
+    }
 ]
 
 ROOT_URLCONF = "sfperformance.urls"
@@ -49,6 +65,11 @@ DATABASES = {
         "PORT": os.environ.get("DB_PORT", "5432"),
     }
 }
+
+# `manage.py test` uses in-memory SQLite so tests run anywhere (no local PostgreSQL needed).
+# Set DJANGO_TEST_DB=postgres to run the tests against PostgreSQL instead.
+if "test" in sys.argv and os.environ.get("DJANGO_TEST_DB") != "postgres":
+    DATABASES["default"] = {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 USE_TZ = True

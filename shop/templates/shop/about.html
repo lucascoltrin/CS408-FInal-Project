@@ -1,0 +1,30 @@
+{% extends "shop/base.html" %}
+{% block title %}About &amp; Contact | {{ shop.name }}{% endblock %}
+{% block content %}
+<div class="container mt-5">
+  <div class="row g-5">
+    <div class="col-md-6">
+      <h1 class="h2">About {{ shop.name }}</h1>
+      <p>{{ shop.name }} is an independent shop focused on performance modifications and repair work. Work is done by appointment only, so every customer gets the owner's full attention.</p>
+      <p class="text-muted mb-0">Hours: {{ shop.hours }}<br>Location: {{ shop.location }}</p>
+    </div>
+    <div class="col-md-6">
+      <h2 class="h3">Contact the owner</h2>
+      {% if sent %}
+        <div class="alert alert-success" role="alert">Thanks, your message was sent. The owner will get back to you.</div>
+      {% endif %}
+      <form method="post" action="{% url 'about' %}" novalidate>
+        {% csrf_token %}
+        {% for field in form %}
+          <div class="mb-3">
+            <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+        {% endfor %}
+        <button type="submit" class="btn btn-dark">Send message</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
