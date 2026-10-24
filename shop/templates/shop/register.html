@@ -1,0 +1,21 @@
+{% extends "shop/base.html" %}
+{% block title %}Register | {{ shop.name }}{% endblock %}
+{% block content %}
+<div class="container mt-5" style="max-width: 560px;">
+  <h1 class="h2">Create an account</h1>
+  <form method="post" action="{% url 'register' %}" novalidate>
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ next }}">
+    {% for field in form %}
+      <div class="mb-3">
+        <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+        {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+    {% endfor %}
+    <button type="submit" class="btn btn-dark">Register</button>
+    <a class="ms-2" href="{% url 'login' %}">Already have an account?</a>
+  </form>
+</div>
+{% endblock %}
