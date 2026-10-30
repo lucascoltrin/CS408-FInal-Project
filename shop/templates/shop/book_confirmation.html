@@ -1,0 +1,27 @@
+{% extends "shop/base.html" %}
+{% block title %}Appointment requested | {{ shop.name }}{% endblock %}
+{% block content %}
+<div class="container mt-5" style="max-width: 720px;">
+  <div class="alert alert-success" role="alert">
+    <h1 class="h4 alert-heading">Appointment requested</h1>
+    Thanks, {{ appointment.vehicle.customer.name }}. Your request is <strong>{{ appointment.get_status_display|lower }}</strong> until the owner approves it.
+  </div>
+
+  <dl class="row">
+    <dt class="col-sm-3">Vehicle</dt><dd class="col-sm-9">{{ appointment.vehicle }}</dd>
+    <dt class="col-sm-3">Date</dt><dd class="col-sm-9">{{ appointment.date|date:"l, F j, Y" }}</dd>
+    <dt class="col-sm-3">Time</dt><dd class="col-sm-9">{{ appointment.time|time:"g:i A" }}</dd>
+    <dt class="col-sm-3">Status</dt><dd class="col-sm-9">{{ appointment.get_status_display }}</dd>
+  </dl>
+
+  <table class="table">
+    <thead><tr><th>Service</th><th class="text-end">Estimated price</th></tr></thead>
+    <tbody>
+      {% for service in items %}<tr><td>{{ service.name }}</td><td class="text-end">${{ service.price }}</td></tr>{% endfor %}
+    </tbody>
+    <tfoot><tr><th>Estimated total</th><th class="text-end">${{ total }}</th></tr></tfoot>
+  </table>
+
+  <a class="btn btn-outline-dark" href="{% url 'home' %}">Back to home</a>
+</div>
+{% endblock %}

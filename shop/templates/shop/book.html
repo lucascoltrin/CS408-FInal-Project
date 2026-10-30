@@ -1,0 +1,72 @@
+{% extends "shop/base.html" %}
+{% block title %}Book an Appointment | {{ shop.name }}{% endblock %}
+{% block content %}
+<div class="container mt-5" style="max-width: 720px;">
+  <h1 class="h2">Book an Appointment</h1>
+  <p class="text-muted">
+    Pick the work you want and a preferred date and time. Your request is sent to the owner as <strong>pending</strong> until it is approved.
+    {% if current_customer %}Booking as <strong>{{ current_customer.name }}</strong>.
+    {% else %}<a href="{% url 'login' %}?next={% url 'book' %}">Log in</a> to reuse your saved info, or fill in your details below.{% endif %}
+  </p>
+
+  <form method="post" action="{% url 'book' %}" novalidate>
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+
+    {% if not current_customer %}
+      <h2 class="h5 mt-4">Your info</h2>
+      {% for field in form %}{% if field.name == 'name' or field.name == 'phone' or field.name == 'email' %}
+        <div class="mb-3">
+          <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+          {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      {% endif %}{% endfor %}
+    {% endif %}
+
+    <h2 class="h5 mt-4">Vehicle</h2>
+    {% if "vehicle" in form.fields %}
+      <div class="mb-3">
+        <label class="form-label" for="{{ form.vehicle.id_for_label }}">Saved vehicles</label>
+        {{ form.vehicle }}
+        <div class="form-text">Choose one, or pick "Add a new vehicle" and fill in the details below.</div>
+        {% for error in form.vehicle.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+    {% endif %}
+    <div class="row g-3">
+      {% for field in form %}{% if field.name == 'make' or field.name == 'model' or field.name == 'year' or field.name == 'plate' %}
+        <div class="col-sm-6">
+          <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+          {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      {% endif %}{% endfor %}
+    </div>
+
+    <h2 class="h5 mt-4">Services</h2>
+    {% for error in form.services.errors %}<div class="text-danger small mb-2">{{ error }}</div>{% endfor %}
+    {% for checkbox in form.services %}
+      <div class="form-check mb-1">
+        {{ checkbox.tag }}
+        <label class="form-check-label" for="{{ checkbox.id_for_label }}">{{ checkbox.choice_label }}</label>
+      </div>
+    {% endfor %}
+
+    <h2 class="h5 mt-4">Preferred date and time</h2>
+    <div class="row g-3">
+      <div class="col-sm-6">
+        <label class="form-label" for="{{ form.date.id_for_label }}">Date</label>
+        {{ form.date }}
+        {% for error in form.date.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="col-sm-6">
+        <label class="form-label" for="{{ form.time.id_for_label }}">Time</label>
+        {{ form.time }}
+        {% for error in form.time.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-dark btn-lg mt-4">Request appointment</button>
+  </form>
+</div>
+{% endblock %}

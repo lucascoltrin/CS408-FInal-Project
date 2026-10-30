@@ -26,6 +26,7 @@
   {% else %}
     <p>Your cart is empty.</p>
   {% endif %}
+  {% if items %}<a class="btn btn-dark me-2" href="{% url 'book' %}">Book these services</a>{% endif %}
   <a class="btn btn-outline-dark" href="{% url 'services' %}">Back to Services &amp; Pricing</a>
 </div>
 {% endblock %}

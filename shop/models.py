@@ -2,6 +2,9 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 
+GUEST_PREFIX = "guest-"  # usernames starting with this belong to one-off guest bookings
+
+
 class Customer(models.Model):
     name = models.CharField(max_length=100)
     phone = models.CharField(max_length=20)
@@ -11,6 +14,10 @@ class Customer(models.Model):
 
     class Meta:
         db_table = "customers"
+
+    @property
+    def is_guest(self):
+        return self.username.startswith(GUEST_PREFIX)
 
     def __str__(self):
         return self.name
@@ -25,9 +32,12 @@ class Vehicle(models.Model):
 
     class Meta:
         db_table = "vehicles"
+        constraints = [
+            models.UniqueConstraint(fields=["customer", "plate"], name="unique_plate_per_customer"),
+        ]
 
     def __str__(self):
-        return f"{self.year} {self.make} {self.model}"
+        return f"{self.year} {self.make} {self.model} ({self.plate})"
 
 
 class Service(models.Model):

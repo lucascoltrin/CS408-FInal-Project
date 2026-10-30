@@ -18,6 +18,7 @@
         <div class="collapse navbar-collapse" id="nav">
           <ul class="navbar-nav ms-auto">
             <li class="nav-item"><a class="nav-link {% if request.path == '/' %}active{% endif %}" href="{% url 'home' %}">Home</a></li>
+            <li class="nav-item"><a class="nav-link {% if request.path == '/book/' %}active{% endif %}" href="{% url 'book' %}">Book an Appointment</a></li>
             <li class="nav-item"><a class="nav-link {% if request.path == '/services/' %}active{% endif %}" href="{% url 'services' %}">Services &amp; Pricing</a></li>
             <li class="nav-item"><a class="nav-link {% if request.path == '/about/' %}active{% endif %}" href="{% url 'about' %}">About &amp; Contact</a></li>
             {% if current_customer %}
@@ -61,6 +62,7 @@
       </div>
       <div class="text-md-end">
         <a class="link-light" href="{% url 'home' %}">Home</a> &middot;
+        <a class="link-light" href="{% url 'book' %}">Book an Appointment</a> &middot;
         <a class="link-light" href="{% url 'services' %}">Services &amp; Pricing</a> &middot;
         <a class="link-light" href="{% url 'about' %}">About &amp; Contact</a>
       </div>

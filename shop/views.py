@@ -8,8 +8,8 @@ from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
-from .forms import ContactForm, LoginForm, RegisterForm
-from .models import Customer, Service
+from .forms import BookingForm, ContactForm, LoginForm, RegisterForm
+from .models import Appointment, Customer, Service
 
 # Used to spend the same time hashing when a username does not exist.
 _DUMMY_HASH = make_password("not-a-real-password")
@@ -139,3 +139,42 @@ def cart_remove(request):
     request.session["cart"] = [i for i in request.session.get("cart", []) if i != service_id]
     messages.info(request, "Removed from your cart.")
     return redirect("cart")
+
+
+def _current_customer(request):
+    customer_id = request.session.get("customer_id")
+    return Customer.objects.filter(pk=customer_id).first() if customer_id else None
+
+
+def book(request):
+    customer = _current_customer(request)
+    if request.method == "POST":
+        form = BookingForm(request.POST, customer=customer)
+        if form.is_valid():
+            appointment = form.book()
+            if customer:
+                request.session["cart"] = []
+            request.session["last_appointment_id"] = appointment.pk
+            return redirect("book_confirmation")
+    else:
+        initial = {"services": request.session.get("cart", [])} if customer else {}
+        form = BookingForm(customer=customer, initial=initial)
+    return render(request, "shop/book.html", {"form": form})
+
+
+def book_confirmation(request):
+    """Shows the visitor's most recent booking. Tied to the session, so IDs are never in the URL."""
+    appointment_id = request.session.get("last_appointment_id")
+    appointment = (
+        Appointment.objects.select_related("vehicle__customer")
+        .prefetch_related("appointment_services__service")
+        .filter(pk=appointment_id).first()
+        if appointment_id else None
+    )
+    if appointment is None:
+        return redirect("book")
+    items = [row.service for row in appointment.appointment_services.all()]
+    total = sum((s.price for s in items), Decimal("0.00"))
+    return render(request, "shop/book_confirmation.html", {
+        "appointment": appointment, "items": items, "total": total,
+    })

@@ -5,7 +5,7 @@
   <h1 class="h2">Services &amp; Pricing</h1>
   <p class="text-muted">
     Prices are estimates and may change based on your vehicle.
-    {% if not current_customer %}<a href="{% url 'login' %}?next={% url 'services' %}">Log in</a> or <a href="{% url 'register' %}">register</a> to add services to your cart.{% endif %}
+    {% if not current_customer %}<a href="{% url 'login' %}?next={% url 'services' %}">Log in</a> or <a href="{% url 'register' %}">register</a> to add services to your cart, or <a href="{% url 'book' %}">book without an account</a>.{% endif %}
   </p>
   <div class="row g-4">
     {% for service in services %}
