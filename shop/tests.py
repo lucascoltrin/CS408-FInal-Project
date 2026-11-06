@@ -411,3 +411,187 @@ class LoggedInBookingTests(TestCase):
         })
         self.assertEqual(response.status_code, 200)
         self.assertEqual(Appointment.objects.count(), 0)
+
+
+# ---------------------------------------------------------------- Checkpoint 4
+
+from django.contrib.auth.hashers import make_password as _make_password  # noqa: E402
+
+
+def make_guest(phone="555-010-0199", username="guest-abc"):
+    return Customer.objects.create(
+        name="Gus", phone=phone, email="gus@example.com",
+        username=username, password_hash=_make_password(None),
+    )
+
+
+def make_booking(customer, plate="ABC123", date=None, status="pending", services=()):
+    vehicle, _ = Vehicle.objects.get_or_create(
+        customer=customer, plate=plate, defaults={"make": "Subaru", "model": "WRX", "year": 2018},
+    )
+    appointment = Appointment.objects.create(
+        vehicle=vehicle, date=date or future(), time=datetime.time(9, 0), status=status,
+    )
+    for service in services:
+        AppointmentService.objects.create(appointment=appointment, service=service)
+    return appointment
+
+
+class HistoryLookupTests(TestCase):
+    def setUp(self):
+        self.svc = Service.objects.create(name="Svc A", description="a", price=Decimal("10.00"))
+        self.guest = make_guest()
+        self.appt = make_booking(self.guest, services=[self.svc], status="approved")
+        other = make_guest(phone="555-010-0200", username="guest-other")
+        make_booking(other, plate="OTHER99", services=[self.svc])
+
+    def lookup(self, plate="ABC123", phone="555-010-0199"):
+        return self.client.post("/history/", {"plate": plate, "phone": phone})
+
+    def test_guest_page_lists_no_vehicles_until_lookup(self):
+        response = self.client.get("/history/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Look up a vehicle")
+        self.assertNotContains(response, "ABC123")
+        self.assertNotContains(response, "OTHER99")
+
+    def test_matching_plate_and_phone_shows_history(self):
+        response = self.lookup()
+        self.assertContains(response, "2018 Subaru WRX (ABC123)")
+        self.assertContains(response, "Svc A")
+        self.assertContains(response, "Approved")
+
+    def test_formatting_of_plate_and_phone_does_not_matter(self):
+        self.assertContains(self.lookup("abc-123", "(555) 010-0199"), "ABC123")
+
+    def test_wrong_phone_shows_nothing(self):
+        response = self.lookup(phone="555-010-0200")
+        self.assertContains(response, "No vehicle found")
+        self.assertNotContains(response, "Svc A")
+
+    def test_unknown_plate_gets_the_same_message(self):
+        self.assertContains(self.lookup("NOPE000"), "No vehicle found")
+
+    def test_other_customers_data_is_never_shown(self):
+        response = self.lookup()
+        self.assertNotContains(response, "OTHER99")
+        self.assertNotContains(response, "gus@example.com")
+
+    def test_invalid_phone_and_blank_plate_are_rejected(self):
+        self.assertContains(self.lookup(phone="123"), "10-digit phone number")
+        self.assertContains(self.lookup(plate=" - "), "Enter a license plate.")
+
+    def test_completed_service_shows_its_cost(self):
+        row = AppointmentService.objects.get(appointment=self.appt)
+        row.cost = Decimal("42.00")
+        row.save()
+        self.assertContains(self.lookup(), "$42.00")
+
+    def test_guest_cannot_change_appointments(self):
+        self.assertNotContains(self.lookup(), "Change")
+
+    def test_every_matching_vehicle_is_shown(self):
+        member = make_customer()
+        member.phone = "555-010-0199"
+        member.save()
+        make_booking(member, plate="ABC123")
+        response = self.lookup()
+        self.assertEqual(len(response.context["lookup_results"]), 2)
+
+
+class LoggedInHistoryTests(TestCase):
+    def setUp(self):
+        self.svc = Service.objects.create(name="Svc A", description="a", price=Decimal("10.00"))
+        self.me = make_customer()
+        self.client.post("/login/", {"username": "sam", "password": "correct-horse-1"})
+
+    def test_empty_state(self):
+        self.assertContains(self.client.get("/history/"), "You have no vehicles yet")
+
+    def test_shows_only_my_vehicles_with_status(self):
+        make_booking(self.me, plate="MINE123", services=[self.svc], status="in_progress")
+        make_booking(make_customer("other"), plate="THEIRS1", services=[self.svc])
+        response = self.client.get("/history/")
+        self.assertContains(response, "MINE123")
+        self.assertContains(response, "In progress")
+        self.assertNotContains(response, "THEIRS1")
+
+    def test_change_link_only_on_upcoming_open_appointments(self):
+        upcoming = make_booking(self.me, plate="UP1", status="pending")
+        done = make_booking(self.me, plate="DONE1", status="completed")
+        past = make_booking(self.me, plate="PAST1", date=future(-3), status="pending")
+        response = self.client.get("/history/")
+        self.assertContains(response, f"/appointments/{upcoming.pk}/edit/")
+        self.assertNotContains(response, f"/appointments/{done.pk}/edit/")
+        self.assertNotContains(response, f"/appointments/{past.pk}/edit/")
+
+    def test_lookup_form_is_still_available(self):
+        self.assertContains(self.client.get("/history/"), "Booked without an account?")
+
+
+class AppointmentEditTests(TestCase):
+    def setUp(self):
+        self.a = Service.objects.create(name="Svc A", description="a", price=Decimal("10.00"))
+        self.b = Service.objects.create(name="Svc B", description="b", price=Decimal("20.00"))
+        self.c = Service.objects.create(name="Svc C", description="c", price=Decimal("30.00"))
+        self.me = make_customer()
+        self.appt = make_booking(self.me, services=[self.a, self.b], status="approved")
+        self.url = f"/appointments/{self.appt.pk}/edit/"
+
+    def login(self, username="sam"):
+        self.client.post("/login/", {"username": username, "password": "correct-horse-1"})
+
+    def post(self, **overrides):
+        data = {"services": [self.b.pk, self.c.pk], "date": future(10).isoformat(), "time": "14:15"}
+        data.update(overrides)
+        return self.client.post(self.url, data)
+
+    def test_login_required(self):
+        self.assertRedirects(self.client.get(self.url), f"/login/?next={self.url}")
+        self.assertRedirects(self.client.post(self.url, {}), "/login/?next=/services/")
+
+    def test_form_is_prefilled(self):
+        self.login()
+        initial = self.client.get(self.url).context["form"].initial
+        self.assertEqual(set(initial["services"]), {self.a.pk, self.b.pk})
+        self.assertEqual(initial["date"], self.appt.date)
+
+    def test_update_changes_date_time_services_and_resets_status(self):
+        self.login()
+        kept_row = AppointmentService.objects.get(appointment=self.appt, service=self.b)
+        self.assertRedirects(self.post(), "/history/")
+        self.appt.refresh_from_db()
+        self.assertEqual((self.appt.date, self.appt.time), (future(10), datetime.time(14, 15)))
+        self.assertEqual(self.appt.status, "pending")
+        services = set(self.appt.appointment_services.values_list("service_id", flat=True))
+        self.assertEqual(services, {self.b.pk, self.c.pk})
+        self.assertTrue(AppointmentService.objects.filter(pk=kept_row.pk).exists())  # kept, not recreated
+
+    def test_other_customers_cannot_touch_it(self):
+        make_customer("other")
+        self.login("other")
+        self.assertEqual(self.client.get(self.url).status_code, 404)
+        self.assertEqual(self.post().status_code, 404)
+        self.appt.refresh_from_db()
+        self.assertEqual(self.appt.status, "approved")
+
+    def test_completed_appointment_cannot_be_changed(self):
+        self.appt.status = "completed"
+        self.appt.save()
+        self.login()
+        self.assertRedirects(self.post(), "/history/")
+        self.appt.refresh_from_db()
+        self.assertEqual(self.appt.date, future())
+
+    def test_past_appointment_cannot_be_changed(self):
+        self.appt.date = future(-2)
+        self.appt.save()
+        self.login()
+        self.assertRedirects(self.client.get(self.url), "/history/")
+
+    def test_invalid_changes_are_rejected(self):
+        self.login()
+        self.assertContains(self.post(date=future(-1).isoformat()), "today or a future date")
+        self.assertContains(self.post(services=[]), "Choose at least one service.")
+        self.appt.refresh_from_db()
+        self.assertEqual((self.appt.status, self.appt.date), ("approved", future()))

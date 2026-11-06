@@ -3,12 +3,15 @@ from functools import wraps
 
 from django.contrib import messages
 from django.contrib.auth.hashers import check_password, make_password
+from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
-from .forms import BookingForm, ContactForm, LoginForm, RegisterForm
+from .forms import (
+    AppointmentEditForm, BookingForm, ContactForm, LoginForm, RegisterForm, VehicleLookupForm,
+)
 from .models import Appointment, Customer, Service
 
 # Used to spend the same time hashing when a username does not exist.
@@ -178,3 +181,53 @@ def book_confirmation(request):
     return render(request, "shop/book_confirmation.html", {
         "appointment": appointment, "items": items, "total": total,
     })
+
+
+def _with_history(vehicles):
+    """Attach each vehicle's appointments (newest first) and their services in a few queries."""
+    appointments = Appointment.objects.order_by("-date", "-time").prefetch_related("appointment_services__service")
+    return vehicles.prefetch_related(Prefetch("appointments", queryset=appointments))
+
+
+def history(request):
+    """Service history. Logged-in customers see their own vehicles; guests look one up by plate + phone."""
+    customer = _current_customer(request)
+    lookup_results = None
+    if request.method == "POST":
+        lookup_form = VehicleLookupForm(request.POST)
+        if lookup_form.is_valid():
+            lookup_results = list(_with_history(lookup_form.find_vehicles()))
+    else:
+        lookup_form = VehicleLookupForm()
+    own_vehicles = list(_with_history(customer.vehicles.order_by("year", "make", "model"))) if customer else None
+    return render(request, "shop/history.html", {
+        "own_vehicles": own_vehicles, "lookup_form": lookup_form, "lookup_results": lookup_results,
+    })
+
+
+@customer_required
+def appointment_edit(request, pk):
+    # Scoped to the logged-in customer, so other people's appointments are a plain 404.
+    appointment = get_object_or_404(
+        Appointment.objects.select_related("vehicle"), pk=pk, vehicle__customer_id=request.session["customer_id"],
+    )
+    if not appointment.can_edit:
+        messages.info(request, "That appointment can no longer be changed online.")
+        return redirect("history")
+    if request.method == "POST":
+        form = AppointmentEditForm(request.POST)
+        if form.is_valid():
+            was_approved = appointment.status == "approved"
+            form.save(appointment)
+            messages.success(
+                request,
+                "Appointment updated. It is pending until the owner approves it again."
+                if was_approved else "Appointment updated.",
+            )
+            return redirect("history")
+    else:
+        form = AppointmentEditForm(initial={
+            "date": appointment.date, "time": appointment.time,
+            "services": list(appointment.appointment_services.values_list("service_id", flat=True)),
+        })
+    return render(request, "shop/appointment_edit.html", {"form": form, "appointment": appointment})

@@ -22,6 +22,23 @@ def normalize_phone(raw):
     return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
 
 
+def normalize_plate(raw):
+    """Uppercase and strip spaces/dashes so 'abc 123' and 'ABC-123' match. Blank stays blank."""
+    plate = re.sub(r"[\s-]", "", (raw or "").upper())
+    if plate and not re.fullmatch(r"[A-Z0-9]{1,20}", plate):
+        raise forms.ValidationError("Plates can only use letters, numbers, spaces, and dashes.")
+    return plate
+
+
+def validate_booking_date(day):
+    today = timezone.localdate()
+    if day < today:
+        raise forms.ValidationError("Choose today or a future date.")
+    if (day - today).days > 365:
+        raise forms.ValidationError("Choose a date within the next year.")
+    return day
+
+
 class ContactForm(forms.ModelForm):
     class Meta:
         model = ContactMessage
@@ -132,19 +149,10 @@ class BookingForm(forms.Form):
         return year
 
     def clean_plate(self):
-        plate = re.sub(r"[\s-]", "", (self.cleaned_data.get("plate") or "").upper())
-        if plate and not re.fullmatch(r"[A-Z0-9]{1,20}", plate):
-            raise forms.ValidationError("Plates can only use letters, numbers, spaces, and dashes.")
-        return plate
+        return normalize_plate(self.cleaned_data.get("plate"))
 
     def clean_date(self):
-        day = self.cleaned_data["date"]
-        today = timezone.localdate()
-        if day < today:
-            raise forms.ValidationError("Choose today or a future date.")
-        if (day - today).days > 365:
-            raise forms.ValidationError("Choose a date within the next year.")
-        return day
+        return validate_booking_date(self.cleaned_data["date"])
 
     def clean(self):
         cleaned = super().clean()
@@ -183,4 +191,60 @@ class BookingForm(forms.Form):
         appointment = Appointment.objects.create(vehicle=vehicle, date=cd["date"], time=cd["time"])
         for service in cd["services"]:
             AppointmentService.objects.create(appointment=appointment, service=service)
+        return appointment
+
+
+class VehicleLookupForm(forms.Form):
+    """Guest lookup. Both the plate and the phone used at booking must match."""
+
+    plate = forms.CharField(max_length=20, widget=forms.TextInput(attrs={"class": "form-control"}))
+    phone = forms.CharField(
+        max_length=20, label="Phone number used when booking",
+        widget=forms.TextInput(attrs={"class": "form-control"}),
+    )
+
+    def clean_plate(self):
+        plate = normalize_plate(self.cleaned_data["plate"])
+        if not plate:
+            raise forms.ValidationError("Enter a license plate.")
+        return plate
+
+    def clean_phone(self):
+        return normalize_phone(self.cleaned_data["phone"])
+
+    def find_vehicles(self):
+        cd = self.cleaned_data
+        return Vehicle.objects.filter(plate=cd["plate"], customer__phone=cd["phone"])
+
+
+class AppointmentEditForm(forms.Form):
+    """Lets a customer change the date, time, and services of an upcoming appointment."""
+
+    services = ServiceChoiceField(
+        queryset=Service.objects.order_by("name"),
+        widget=forms.CheckboxSelectMultiple(attrs={"class": "form-check-input"}),
+        error_messages={"required": "Choose at least one service."},
+    )
+    date = forms.DateField(widget=forms.DateInput(format="%Y-%m-%d", attrs={"type": "date", "class": "form-control"}))
+    time = forms.TimeField(widget=forms.TimeInput(format="%H:%M", attrs={"type": "time", "class": "form-control"}))
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["date"].widget.attrs["min"] = timezone.localdate().isoformat()
+
+    def clean_date(self):
+        return validate_booking_date(self.cleaned_data["date"])
+
+    @transaction.atomic
+    def save(self, appointment):
+        cd = self.cleaned_data
+        appointment.date, appointment.time = cd["date"], cd["time"]
+        appointment.status = "pending"  # any change needs the owner's approval again
+        appointment.save(update_fields=["date", "time", "status"])
+        wanted = {service.pk for service in cd["services"]}
+        appointment.appointment_services.exclude(service_id__in=wanted).delete()
+        have = set(appointment.appointment_services.values_list("service_id", flat=True))
+        for service in cd["services"]:
+            if service.pk not in have:
+                AppointmentService.objects.create(appointment=appointment, service=service)
         return appointment

@@ -1,0 +1,43 @@
+{% extends "shop/base.html" %}
+{% block title %}Service History | {{ shop.name }}{% endblock %}
+{% block content %}
+<div class="container mt-5">
+  <h1 class="h2">Service History</h1>
+  <p class="text-muted">Statuses are current each time you load this page.</p>
+
+  {% if current_customer %}
+    <h2 class="h4 mt-4">Your vehicles</h2>
+    {% for vehicle in own_vehicles %}
+      {% include "shop/_vehicle_history.html" with vehicle=vehicle editable=True %}
+    {% empty %}
+      <p>You have no vehicles yet. <a href="{% url 'book' %}">Book an appointment</a> to add one.</p>
+    {% endfor %}
+  {% else %}
+    <p><a href="{% url 'login' %}?next={% url 'history' %}">Log in</a> to see all of your vehicles, or look one up below.</p>
+  {% endif %}
+
+  <h2 class="h4 mt-5">{% if current_customer %}Booked without an account?{% else %}Look up a vehicle{% endif %}</h2>
+  <p class="text-muted">Enter the license plate and the phone number you gave when you booked.</p>
+  <form method="post" action="{% url 'history' %}" class="row g-3 mb-4" novalidate>
+    {% csrf_token %}
+    {% for field in lookup_form %}
+      <div class="col-md-5">
+        <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+    {% endfor %}
+    <div class="col-md-2 d-flex align-items-end">
+      <button type="submit" class="btn btn-dark w-100">Look up</button>
+    </div>
+  </form>
+
+  {% if lookup_results is not None %}
+    {% for vehicle in lookup_results %}
+      {% include "shop/_vehicle_history.html" with vehicle=vehicle editable=False %}
+    {% empty %}
+      <div class="alert alert-warning" role="alert">No vehicle found for that plate and phone number.</div>
+    {% endfor %}
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,40 @@
+{% extends "shop/base.html" %}
+{% block title %}Change appointment | {{ shop.name }}{% endblock %}
+{% block content %}
+<div class="container mt-5" style="max-width: 720px;">
+  <h1 class="h2">Change appointment</h1>
+  <p class="text-muted">
+    {{ appointment.vehicle }}. Changes are sent to the owner as <strong>pending</strong> and need approval again.
+  </p>
+  <form method="post" action="{% url 'appointment_edit' appointment.pk %}" novalidate>
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+
+    <h2 class="h5 mt-4">Services</h2>
+    {% for error in form.services.errors %}<div class="text-danger small mb-2">{{ error }}</div>{% endfor %}
+    {% for checkbox in form.services %}
+      <div class="form-check mb-1">
+        {{ checkbox.tag }}
+        <label class="form-check-label" for="{{ checkbox.id_for_label }}">{{ checkbox.choice_label }}</label>
+      </div>
+    {% endfor %}
+
+    <h2 class="h5 mt-4">Preferred date and time</h2>
+    <div class="row g-3">
+      <div class="col-sm-6">
+        <label class="form-label" for="{{ form.date.id_for_label }}">Date</label>
+        {{ form.date }}
+        {% for error in form.date.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="col-sm-6">
+        <label class="form-label" for="{{ form.time.id_for_label }}">Time</label>
+        {{ form.time }}
+        {% for error in form.time.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-dark mt-4">Save changes</button>
+    <a class="btn btn-outline-dark mt-4 ms-2" href="{% url 'history' %}">Cancel</a>
+  </form>
+</div>
+{% endblock %}

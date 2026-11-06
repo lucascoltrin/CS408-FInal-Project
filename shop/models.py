@@ -1,5 +1,6 @@
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.utils import timezone
 
 
 GUEST_PREFIX = "guest-"  # usernames starting with this belong to one-off guest bookings
@@ -67,6 +68,20 @@ class Appointment(models.Model):
 
     class Meta:
         db_table = "appointments"
+
+    BADGE_COLORS = {
+        "pending": "warning", "approved": "primary", "in_progress": "info",
+        "completed": "success", "denied": "danger",
+    }
+
+    @property
+    def status_badge(self):
+        return self.BADGE_COLORS.get(self.status, "secondary")
+
+    @property
+    def can_edit(self):
+        """Customers may change an appointment only while it is upcoming and not yet started."""
+        return self.status in ("pending", "approved") and self.date >= timezone.localdate()
 
     def __str__(self):
         return f"{self.vehicle} on {self.date}"
