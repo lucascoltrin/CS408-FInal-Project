@@ -1,0 +1,59 @@
+{% extends "shop/base.html" %}
+{% block title %}Dashboard | {{ shop.name }}{% endblock %}
+{% block content %}
+<div class="container mt-5">
+  <h1 class="h2">Appointments</h1>
+  <p class="text-muted">Upcoming appointments are listed first, soonest at the top, then past ones.</p>
+
+  <ul class="nav nav-pills mb-3">
+    {% for key, label, count in tabs %}
+      <li class="nav-item">
+        <a class="nav-link {% if key == active_status %}active{% endif %}" href="{% url 'dashboard' %}{% if key %}?status={{ key }}{% endif %}">
+          {{ label }} <span class="badge text-bg-light">{{ count }}</span>
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+
+  {% if appointments %}
+    <div class="table-responsive">
+      <table class="table align-middle">
+        <thead>
+          <tr><th>Date</th><th>Time</th><th>Customer</th><th>Vehicle</th><th>Services</th><th>Status</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for appointment in appointments %}
+            <tr>
+              <td>{{ appointment.date|date:"M j, Y" }}</td>
+              <td>{{ appointment.time|time:"g:i A" }}</td>
+              <td>
+                {{ appointment.vehicle.customer.name }}{% if appointment.vehicle.customer.is_guest %} <span class="badge text-bg-secondary">Guest</span>{% endif %}<br>
+                <span class="text-muted small">{{ appointment.vehicle.customer.phone }}</span>
+              </td>
+              <td>{{ appointment.vehicle }}</td>
+              <td>
+                {% for row in appointment.appointment_services.all %}{{ row.service.name }}{% if not forloop.last %}<br>{% endif %}{% endfor %}
+              </td>
+              <td><span class="badge text-bg-{{ appointment.status_badge }}">{{ appointment.get_status_display }}</span></td>
+              <td class="text-end text-nowrap">
+                {% if appointment.status == 'pending' %}
+                  <form method="post" action="{% url 'dashboard_action' appointment.pk %}" class="d-inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <button name="action" value="approve" class="btn btn-sm btn-success">Approve</button>
+                    <button name="action" value="deny" class="btn btn-sm btn-outline-danger">Deny</button>
+                  </form>
+                {% endif %}
+                <a class="btn btn-sm btn-outline-dark" href="{% url 'dashboard_appointment' appointment.pk %}">Manage</a>
+                <a class="btn btn-sm btn-outline-secondary" href="{% url 'dashboard_delete' appointment.pk %}">Delete</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p>No appointments{% if active_status %} with that status{% endif %}.</p>
+  {% endif %}
+</div>
+{% endblock %}

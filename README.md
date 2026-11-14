@@ -19,3 +19,11 @@ Python 3.10+, PostgreSQL (running).
 ## Prove it starts on boot
     ssh -i ~/keys/mykey.pem ubuntu@<PUBLIC-IP> sudo reboot
     # wait ~1 minute, then load http://<PUBLIC-IP>/
+
+## Staff login (owner dashboard)
+There is no public sign-up for staff. Create the owner login on the server (or locally) and you will be prompted for a password:
+
+    cd /opt/sfperformance
+    ./venv/bin/python manage.py create_employee --username owner --name "Owner"
+
+Reset a forgotten password with `--reset-password`. Staff log in at `/staff/login/` (there is no link to it on the public site) and land on `/dashboard/`.

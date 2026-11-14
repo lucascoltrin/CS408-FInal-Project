@@ -1,4 +1,4 @@
-<!doctype html>
+{% load static %}<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -11,7 +11,9 @@
   <header>
     <nav class="navbar navbar-expand-md navbar-dark bg-dark">
       <div class="container">
-        <a class="navbar-brand fw-bold" href="{% url 'home' %}">{{ shop.name }}</a>
+        <a class="navbar-brand py-0" href="{% url 'home' %}">
+          <img src="{% static 'shop/img/logo-white.png' %}" alt="{{ shop.name }}" width="111" height="44" class="d-block">
+        </a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav" aria-controls="nav" aria-expanded="false" aria-label="Toggle navigation">
           <span class="navbar-toggler-icon"></span>
         </button>
@@ -22,6 +24,15 @@
             <li class="nav-item"><a class="nav-link {% if request.path == '/history/' %}active{% endif %}" href="{% url 'history' %}">Service History</a></li>
             <li class="nav-item"><a class="nav-link {% if request.path == '/services/' %}active{% endif %}" href="{% url 'services' %}">Services &amp; Pricing</a></li>
             <li class="nav-item"><a class="nav-link {% if request.path == '/about/' %}active{% endif %}" href="{% url 'about' %}">About &amp; Contact</a></li>
+            {% if current_employee %}
+              <li class="nav-item"><a class="nav-link {% if '/dashboard/' in request.path %}active{% endif %}" href="{% url 'dashboard' %}">Dashboard</a></li>
+              <li class="nav-item">
+                <form method="post" action="{% url 'staff_logout' %}" class="d-inline">
+                  {% csrf_token %}
+                  <button type="submit" class="nav-link btn btn-link">Staff log out</button>
+                </form>
+              </li>
+            {% endif %}
             {% if current_customer %}
               <li class="nav-item"><a class="nav-link {% if request.path == '/cart/' %}active{% endif %}" href="{% url 'cart' %}">Cart{% if cart_count %} <span class="badge text-bg-light">{{ cart_count }}</span>{% endif %}</a></li>
               <li class="nav-item">

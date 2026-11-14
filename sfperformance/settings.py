@@ -32,11 +32,13 @@ INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.sessions",
     "django.contrib.messages",
+    "django.contrib.staticfiles",
     "shop",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",  # serves static files (the logo) in production
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -79,6 +81,9 @@ if "test" in sys.argv and os.environ.get("DJANGO_TEST_DB") != "postgres":
 
 if "test" in sys.argv:
     PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]  # fast hashing for tests only
+
+STATIC_URL = "static/"
+WHITENOISE_USE_FINDERS = True  # serve files straight from each app's static/ folder; no collectstatic step
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 USE_TZ = True

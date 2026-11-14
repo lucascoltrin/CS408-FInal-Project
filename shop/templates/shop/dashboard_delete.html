@@ -1,0 +1,17 @@
+{% extends "shop/base.html" %}
+{% block title %}Delete appointment | {{ shop.name }}{% endblock %}
+{% block content %}
+<div class="container mt-5" style="max-width: 640px;">
+  <h1 class="h2">Delete this appointment?</h1>
+  <p>
+    {{ appointment.vehicle }} for {{ appointment.vehicle.customer.name }} on
+    {{ appointment.date|date:"M j, Y" }} at {{ appointment.time|time:"g:i A" }}.
+    This also removes its services and any invoice, and it cannot be undone.
+  </p>
+  <form method="post" action="{% url 'dashboard_delete' appointment.pk %}">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-danger">Yes, delete it</button>
+    <a class="btn btn-outline-dark ms-2" href="{% url 'dashboard' %}">Cancel</a>
+  </form>
+</div>
+{% endblock %}

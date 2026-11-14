@@ -1,4 +1,4 @@
-from .models import Customer
+from .models import Customer, Employee
 
 # Edit these values to change the shop details shown in the header and footer.
 SHOP_INFO = {
@@ -22,4 +22,6 @@ def customer_session(request):
         if customer is None:  # account was deleted; drop the stale session
             request.session.flush()
     cart = request.session.get("cart", []) if customer else []
-    return {"current_customer": customer, "cart_count": len(cart)}
+    employee_id = request.session.get("employee_id")
+    employee = Employee.objects.filter(pk=employee_id).first() if employee_id else None
+    return {"current_customer": customer, "cart_count": len(cart), "current_employee": employee}

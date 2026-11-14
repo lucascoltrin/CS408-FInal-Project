@@ -1,0 +1,19 @@
+{% extends "shop/base.html" %}
+{% block title %}Staff log in | {{ shop.name }}{% endblock %}
+{% block content %}
+<div class="container mt-5" style="max-width: 460px;">
+  <h1 class="h2">Staff log in</h1>
+  {% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
+  <form method="post" action="{% url 'staff_login' %}" novalidate>
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ next }}">
+    {% for field in form %}
+      <div class="mb-3">
+        <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+      </div>
+    {% endfor %}
+    <button type="submit" class="btn btn-dark">Log in</button>
+  </form>
+</div>
+{% endblock %}

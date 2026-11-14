@@ -595,3 +595,314 @@ class AppointmentEditTests(TestCase):
         self.assertContains(self.post(services=[]), "Choose at least one service.")
         self.appt.refresh_from_db()
         self.assertEqual((self.appt.status, self.appt.date), ("approved", future()))
+
+
+# ---------------------------------------------------------------- Checkpoint 5
+
+from io import StringIO  # noqa: E402
+from unittest import mock  # noqa: E402
+
+from django.core.management import call_command  # noqa: E402
+from django.core.management.base import CommandError  # noqa: E402
+
+from .models import Employee  # noqa: E402
+
+STAFF_PW = "owner-pass-1"
+
+
+def make_employee(username="owner", password=STAFF_PW):
+    return Employee.objects.create(name="Owner", username=username, password_hash=_make_password(password))
+
+
+class StaffTestCase(TestCase):
+    def staff_login(self):
+        make_employee()
+        self.client.post("/staff/login/", {"username": "owner", "password": STAFF_PW})
+
+
+class StaffLoginTests(StaffTestCase):
+    def test_login_success_opens_dashboard(self):
+        make_employee()
+        response = self.client.post("/staff/login/", {"username": "owner", "password": STAFF_PW})
+        self.assertRedirects(response, "/dashboard/")
+        self.assertEqual(self.client.get("/dashboard/").status_code, 200)
+
+    def test_bad_credentials_share_one_message(self):
+        make_employee()
+        for creds in [{"username": "owner", "password": "wrong-pass-1"}, {"username": "ghost", "password": "wrong-pass-1"}]:
+            response = self.client.post("/staff/login/", creds)
+            self.assertContains(response, "Invalid username or password.")
+            self.assertNotIn("employee_id", self.client.session)
+
+    def test_visitors_are_sent_to_staff_login(self):
+        self.assertRedirects(self.client.get("/dashboard/"), "/staff/login/?next=/dashboard/")
+
+    def test_customer_login_does_not_grant_dashboard_access(self):
+        make_customer()
+        self.client.post("/login/", {"username": "sam", "password": "correct-horse-1"})
+        self.assertRedirects(self.client.get("/dashboard/"), "/staff/login/?next=/dashboard/")
+
+    def test_staff_cannot_log_in_through_the_customer_form(self):
+        make_employee()
+        response = self.client.post("/login/", {"username": "owner", "password": STAFF_PW})
+        self.assertContains(response, "Invalid username or password.")
+
+    def test_logout_requires_post_and_ends_access(self):
+        self.staff_login()
+        self.assertEqual(self.client.get("/staff/logout/").status_code, 405)
+        self.client.post("/staff/logout/")
+        self.assertRedirects(self.client.get("/dashboard/"), "/staff/login/?next=/dashboard/")
+
+    def test_offsite_next_is_ignored(self):
+        make_employee()
+        response = self.client.post(
+            "/staff/login/", {"username": "owner", "password": STAFF_PW, "next": "https://evil.example/"},
+        )
+        self.assertRedirects(response, "/dashboard/")
+
+    def test_public_pages_do_not_link_to_staff_login(self):
+        for url in ["/", "/about/", "/services/", "/history/", "/book/"]:
+            self.assertNotContains(self.client.get(url), "/staff/login/")
+
+    def test_staff_see_dashboard_link_in_nav(self):
+        self.staff_login()
+        self.assertContains(self.client.get("/"), "Staff log out")
+
+    def test_deleted_employee_loses_access(self):
+        self.staff_login()
+        Employee.objects.all().delete()
+        self.assertRedirects(self.client.get("/dashboard/"), "/staff/login/?next=/dashboard/")
+
+
+class DashboardListTests(StaffTestCase):
+    def setUp(self):
+        self.svc = Service.objects.create(name="Svc A", description="a", price=Decimal("10.00"))
+        self.member = make_customer()
+        self.member.phone = "555-010-0101"
+        self.member.save()
+        self.guest = make_guest()
+        self.soon = make_booking(self.member, plate="SOON1", date=future(2), services=[self.svc])
+        self.later = make_booking(self.guest, plate="LATER1", date=future(9), status="approved", services=[self.svc])
+        self.old = make_booking(self.member, plate="OLD1", date=future(-5), status="completed", services=[self.svc])
+        self.staff_login()
+
+    def test_lists_every_appointment_with_customer_and_vehicle(self):
+        response = self.client.get("/dashboard/")
+        for text in ["SOON1", "LATER1", "OLD1", "555-010-0101", "555-010-0199", "Svc A"]:
+            self.assertContains(response, text)
+
+    def test_guest_bookings_are_marked(self):
+        self.assertContains(self.client.get("/dashboard/"), "Guest")
+
+    def test_upcoming_first_soonest_first_then_past(self):
+        order = [a.pk for a in self.client.get("/dashboard/").context["appointments"]]
+        self.assertEqual(order, [self.soon.pk, self.later.pk, self.old.pk])
+
+    def test_status_filter_and_counts(self):
+        response = self.client.get("/dashboard/?status=pending")
+        self.assertEqual([a.pk for a in response.context["appointments"]], [self.soon.pk])
+        counts = {key: count for key, _, count in response.context["tabs"]}
+        self.assertEqual((counts[""], counts["pending"], counts["approved"], counts["completed"]), (3, 1, 1, 1))
+
+    def test_unknown_filter_shows_all(self):
+        self.assertEqual(len(self.client.get("/dashboard/?status=bogus").context["appointments"]), 3)
+
+
+class DashboardActionTests(StaffTestCase):
+    def setUp(self):
+        self.member = make_customer()
+        self.appt = make_booking(self.member, services=[])
+        self.url = f"/dashboard/appointments/{self.appt.pk}/action/"
+
+    def test_approve_and_deny(self):
+        self.staff_login()
+        self.client.post(self.url, {"action": "approve"})
+        self.appt.refresh_from_db()
+        self.assertEqual(self.appt.status, "approved")
+        self.client.post(self.url, {"action": "deny"})
+        self.appt.refresh_from_db()
+        self.assertEqual(self.appt.status, "denied")
+
+    def test_customer_sees_the_new_status(self):
+        self.staff_login()
+        self.client.post(self.url, {"action": "approve"})
+        self.client.post("/staff/logout/")
+        self.client.post("/login/", {"username": "sam", "password": "correct-horse-1"})
+        self.assertContains(self.client.get("/history/"), "Approved")
+
+    def test_get_is_not_allowed(self):
+        self.staff_login()
+        self.assertEqual(self.client.get(self.url).status_code, 405)
+
+    def test_unknown_action_rejected(self):
+        self.staff_login()
+        self.assertEqual(self.client.post(self.url, {"action": "explode"}).status_code, 400)
+        self.appt.refresh_from_db()
+        self.assertEqual(self.appt.status, "pending")
+
+    def test_requires_staff(self):
+        self.client.post(self.url, {"action": "approve"})
+        self.appt.refresh_from_db()
+        self.assertEqual(self.appt.status, "pending")
+
+
+class ManageAppointmentTests(StaffTestCase):
+    def setUp(self):
+        self.a = Service.objects.create(name="Svc A", description="a", price=Decimal("10.00"))
+        self.b = Service.objects.create(name="Svc B", description="b", price=Decimal("20.00"))
+        self.c = Service.objects.create(name="Svc C", description="c", price=Decimal("30.00"))
+        self.member = make_customer()
+        self.appt = make_booking(self.member, services=[self.a, self.b])
+        self.other = make_booking(self.member, plate="OTHER1", services=[self.a])
+        self.url = f"/dashboard/appointments/{self.appt.pk}/"
+        self.rows = list(self.appt.appointment_services.order_by("id"))
+        self.staff_login()
+
+    def payload(self, status="approved", time="11:00", add="", row_fields=None):
+        data = {
+            "status": status, "date": self.appt.date.isoformat(), "time": time,
+            "services-TOTAL_FORMS": len(self.rows), "services-INITIAL_FORMS": len(self.rows),
+            "services-MIN_NUM_FORMS": 0, "services-MAX_NUM_FORMS": 1000, "add-service": add,
+        }
+        for i, row in enumerate(self.rows):
+            data.update({
+                f"services-{i}-id": row.pk, f"services-{i}-status": row.status,
+                f"services-{i}-hours": "", f"services-{i}-cost": "", f"services-{i}-date_completed": "",
+            })
+            data.update((row_fields or {}).get(i, {}))
+        return data
+
+    def test_page_shows_customer_vehicle_and_services(self):
+        response = self.client.get(self.url)
+        for text in ["Sam", "555-0100", "ABC123", "Svc A", "Svc B"]:
+            self.assertContains(response, text)
+
+    def test_update_status_and_time(self):
+        self.assertRedirects(self.client.post(self.url, self.payload(status="in_progress", time="13:45")), self.url)
+        self.appt.refresh_from_db()
+        self.assertEqual((self.appt.status, self.appt.time), ("in_progress", datetime.time(13, 45)))
+
+    def test_update_service_rows_and_default_completion_date(self):
+        fields = {0: {"services-0-status": "completed", "services-0-hours": "1.5", "services-0-cost": "99.99"}}
+        self.client.post(self.url, self.payload(row_fields=fields))
+        row = AppointmentService.objects.get(pk=self.rows[0].pk)
+        self.assertEqual((row.status, row.hours, row.cost), ("completed", Decimal("1.50"), Decimal("99.99")))
+        self.assertEqual(row.date_completed, timezone.localdate())
+
+    def test_remove_a_service(self):
+        fields = {1: {"services-1-DELETE": "on"}}
+        self.client.post(self.url, self.payload(row_fields=fields))
+        remaining = set(self.appt.appointment_services.values_list("service_id", flat=True))
+        self.assertEqual(remaining, {self.a.pk})
+
+    def test_add_a_service(self):
+        self.client.post(self.url, self.payload(add=self.c.pk))
+        services = set(self.appt.appointment_services.values_list("service_id", flat=True))
+        self.assertEqual(services, {self.a.pk, self.b.pk, self.c.pk})
+
+    def test_already_listed_service_cannot_be_added_again(self):
+        response = self.client.post(self.url, self.payload(add=self.a.pk))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.appt.appointment_services.count(), 2)
+
+    def test_negative_cost_is_rejected_and_nothing_is_saved(self):
+        fields = {0: {"services-0-cost": "-5"}}
+        response = self.client.post(self.url, self.payload(status="completed", row_fields=fields))
+        self.assertEqual(response.status_code, 200)
+        self.appt.refresh_from_db()
+        self.assertEqual(self.appt.status, "pending")
+
+    def test_other_appointments_are_untouched(self):
+        self.client.post(self.url, self.payload(status="denied"))
+        self.other.refresh_from_db()
+        self.assertEqual(self.other.status, "pending")
+
+    def test_requires_staff(self):
+        self.client.post("/staff/logout/")
+        self.assertRedirects(self.client.get(self.url), f"/staff/login/?next={self.url}")
+        self.client.post(self.url, self.payload(status="denied"))
+        self.appt.refresh_from_db()
+        self.assertEqual(self.appt.status, "pending")
+
+    def test_unknown_appointment_is_404(self):
+        self.assertEqual(self.client.get("/dashboard/appointments/99999/").status_code, 404)
+
+
+class DeleteAppointmentTests(StaffTestCase):
+    def setUp(self):
+        self.svc = Service.objects.create(name="Svc A", description="a", price=Decimal("10.00"))
+        self.member = make_customer()
+        self.appt = make_booking(self.member, services=[self.svc])
+        self.url = f"/dashboard/appointments/{self.appt.pk}/delete/"
+
+    def test_get_asks_for_confirmation_and_deletes_nothing(self):
+        self.staff_login()
+        self.assertContains(self.client.get(self.url), "Delete this appointment?")
+        self.assertEqual(Appointment.objects.count(), 1)
+
+    def test_post_deletes_appointment_and_its_services_but_keeps_the_vehicle(self):
+        self.staff_login()
+        self.assertRedirects(self.client.post(self.url), "/dashboard/")
+        self.assertEqual(Appointment.objects.count(), 0)
+        self.assertEqual(AppointmentService.objects.count(), 0)
+        self.assertEqual(Vehicle.objects.count(), 1)
+
+    def test_requires_staff(self):
+        self.client.post(self.url)
+        self.assertEqual(Appointment.objects.count(), 1)
+
+
+class CreateEmployeeCommandTests(TestCase):
+    def run_command(self, *args, **kwargs):
+        return call_command("create_employee", *args, stdout=StringIO(), **kwargs)
+
+    def test_creates_a_login_with_a_hashed_password(self):
+        self.run_command("--username", "owner", "--name", "The Owner", "--password", "owner-pass-1")
+        employee = Employee.objects.get(username="owner")
+        self.assertEqual(employee.name, "The Owner")
+        self.assertNotEqual(employee.password_hash, "owner-pass-1")
+        self.assertTrue(check_password("owner-pass-1", employee.password_hash))
+
+    def test_duplicate_username_is_refused(self):
+        make_employee()
+        with self.assertRaises(CommandError):
+            self.run_command("--username", "owner", "--password", "another-pass-1")
+
+    def test_short_password_is_refused(self):
+        with self.assertRaises(CommandError):
+            self.run_command("--username", "owner", "--password", "short")
+        self.assertEqual(Employee.objects.count(), 0)
+
+    def test_reset_password(self):
+        make_employee()
+        self.run_command("--username", "owner", "--password", "brand-new-pass-1", "--reset-password")
+        self.assertTrue(check_password("brand-new-pass-1", Employee.objects.get().password_hash))
+
+    def test_reset_for_unknown_user_is_refused(self):
+        with self.assertRaises(CommandError):
+            self.run_command("--username", "ghost", "--password", "brand-new-pass-1", "--reset-password")
+
+    def test_prompt_mismatch_is_refused(self):
+        with mock.patch("shop.management.commands.create_employee.getpass", side_effect=["aaaaaaaa1", "bbbbbbbb2"]):
+            with self.assertRaises(CommandError):
+                self.run_command("--username", "owner")
+
+
+# ---------------------------------------------------------------- Logo
+
+class LogoTests(TestCase):
+    def test_header_uses_the_white_logo_on_every_page(self):
+        for url in ["/", "/about/", "/services/", "/book/"]:
+            self.assertContains(self.client.get(url), "shop/img/logo-white.png", msg_prefix=url)
+
+    def test_home_hero_uses_the_black_logo_with_alt_text(self):
+        response = self.client.get("/")
+        self.assertContains(response, "shop/img/logo.png")
+        self.assertContains(response, 'alt="SF Performance"')
+
+    def test_logo_files_are_served(self):
+        for name in ["logo.png", "logo-white.png"]:
+            response = self.client.get(f"/static/shop/img/{name}")
+            self.assertEqual(response.status_code, 200, name)
+            self.assertEqual(response["Content-Type"], "image/png", name)
+            response.close()

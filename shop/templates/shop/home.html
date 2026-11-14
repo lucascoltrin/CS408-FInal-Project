@@ -1,8 +1,12 @@
 {% extends "shop/base.html" %}
+{% load static %}
 {% block content %}
 <section class="bg-light py-5 border-bottom">
   <div class="container text-center py-4">
-    <h1 class="display-4 fw-bold">{{ shop.name }}</h1>
+    <h1 class="mb-3">
+      <img src="{% static 'shop/img/logo.png' %}" alt="{{ shop.name }}" width="473" height="187"
+           class="img-fluid" style="max-width: 340px; width: 100%; height: auto;">
+    </h1>
     <p class="lead text-muted">{{ shop.tagline }}</p>
     <a class="btn btn-dark btn-lg mt-2 me-2" href="{% url 'book' %}">Book an Appointment</a>
     <a class="btn btn-outline-dark btn-lg mt-2 me-2" href="{% url 'services' %}">Services &amp; Pricing</a>
