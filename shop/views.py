@@ -3,16 +3,17 @@ from functools import wraps
 
 from django.contrib import messages
 from django.contrib.auth.hashers import check_password, make_password
-from django.db.models import Prefetch
+from django.db.models import Avg, Count, Prefetch
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
+from . import billing
 from .forms import (
-    AppointmentEditForm, BookingForm, ContactForm, LoginForm, RegisterForm, VehicleLookupForm,
+    AppointmentEditForm, BookingForm, ContactForm, LoginForm, RegisterForm, ReviewForm, VehicleLookupForm,
 )
-from .models import Appointment, Customer, Service
+from .models import Appointment, Customer, Invoice, Review, Service
 
 # Used to spend the same time hashing when a username does not exist.
 _DUMMY_HASH = make_password("not-a-real-password")
@@ -185,7 +186,9 @@ def book_confirmation(request):
 
 def _with_history(vehicles):
     """Attach each vehicle's appointments (newest first) and their services in a few queries."""
-    appointments = Appointment.objects.order_by("-date", "-time").prefetch_related("appointment_services__service")
+    appointments = Appointment.objects.order_by("-date", "-time").prefetch_related(
+        "appointment_services__service", "invoices",
+    )
     return vehicles.prefetch_related(Prefetch("appointments", queryset=appointments))
 
 
@@ -231,3 +234,41 @@ def appointment_edit(request, pk):
             "services": list(appointment.appointment_services.values_list("service_id", flat=True)),
         })
     return render(request, "shop/appointment_edit.html", {"form": form, "appointment": appointment})
+
+
+@customer_required
+def invoice_detail(request, pk):
+    # Scoped to the logged-in customer, so anyone else's invoice is a plain 404.
+    invoice = get_object_or_404(
+        Invoice.objects.select_related("appointment__vehicle"), pk=pk,
+        appointment__vehicle__customer_id=request.session["customer_id"],
+    )
+    return render(request, "shop/invoice_detail.html", {
+        "invoice": invoice, "appointment": invoice.appointment, "data": billing.calculate(invoice.appointment),
+    })
+
+
+def reviews(request):
+    customer = _current_customer(request)
+    can_review = customer is not None and customer.reviews_remaining() > 0
+    if request.method == "POST":
+        if customer is None:
+            messages.info(request, "Please log in to leave a review.")
+            return redirect(f"{reverse('login')}?next={reverse('reviews')}")
+        if not can_review:
+            messages.error(request, "You can leave a review after an appointment has taken place.")
+            return redirect("reviews")
+        form = ReviewForm(request.POST)
+        if form.is_valid():
+            review = form.save(commit=False)
+            review.customer = customer
+            review.save()
+            messages.success(request, "Thanks for your review!")
+            return redirect("reviews")
+    else:
+        form = ReviewForm()
+    return render(request, "shop/reviews.html", {
+        "reviews": Review.objects.select_related("customer").order_by("-date", "-id"),
+        "stats": Review.objects.aggregate(average=Avg("rating"), count=Count("id")),
+        "form": form, "can_review": can_review, "customer": customer,
+    })

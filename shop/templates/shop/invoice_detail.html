@@ -1,0 +1,15 @@
+{% extends "shop/base.html" %}
+{% block title %}Invoice | {{ shop.name }}{% endblock %}
+{% block content %}
+<div class="container mt-5" style="max-width: 760px;">
+  <a href="{% url 'history' %}" class="small">&larr; Back to service history</a>
+  <h1 class="h2 mt-2">Invoice</h1>
+  <p class="text-muted mb-1">{{ appointment.vehicle }}</p>
+  <p class="text-muted">{{ appointment.date|date:"F j, Y" }}</p>
+  <p>
+    Status:
+    <span class="badge text-bg-{% if invoice.payment_status == 'paid' %}success{% else %}secondary{% endif %}">{{ invoice.get_payment_status_display }}</span>
+  </p>
+  {% include "shop/_invoice_lines.html" with data=data labor=invoice.labor_total parts=invoice.parts_total total=invoice.total %}
+</div>
+{% endblock %}

@@ -20,6 +20,26 @@ class Customer(models.Model):
     def is_guest(self):
         return self.username.startswith(GUEST_PREFIX)
 
+    @property
+    def display_name(self):
+        """First name plus last initial, so reviews do not show full names."""
+        parts = self.name.split()
+        if not parts:
+            return "Customer"
+        return parts[0] if len(parts) == 1 else f"{parts[0]} {parts[-1][0].upper()}."
+
+    def reviewable_appointments(self):
+        """Visits that count toward a review: completed, or accepted and already in the past."""
+        today = timezone.localdate()
+        return Appointment.objects.filter(vehicle__customer=self).filter(
+            models.Q(status="completed")
+            | models.Q(status__in=["approved", "in_progress"], date__lt=today)
+        )
+
+    def reviews_remaining(self):
+        """One review per qualifying visit."""
+        return max(self.reviewable_appointments().count() - self.reviews.count(), 0)
+
     def __str__(self):
         return self.name
 
@@ -111,14 +131,18 @@ class PartUsed(models.Model):
 
 
 class Invoice(models.Model):
+    STATUS_CHOICES = [("unpaid", "Unpaid"), ("paid", "Paid")]
     appointment = models.ForeignKey(Appointment, on_delete=models.CASCADE, related_name="invoices")
     labor_total = models.DecimalField(max_digits=10, decimal_places=2)
     parts_total = models.DecimalField(max_digits=10, decimal_places=2)
     total = models.DecimalField(max_digits=10, decimal_places=2)
-    payment_status = models.CharField(max_length=20, default="unpaid")
+    payment_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="unpaid")
 
     class Meta:
         db_table = "invoices"
+        constraints = [
+            models.UniqueConstraint(fields=["appointment"], name="unique_invoice_per_appointment"),
+        ]
 
 
 class Employee(models.Model):
@@ -141,6 +165,10 @@ class Review(models.Model):
 
     class Meta:
         db_table = "reviews"
+
+    @property
+    def stars(self):
+        return "\u2605" * self.rating + "\u2606" * (5 - self.rating)
 
 
 class ContactMessage(models.Model):

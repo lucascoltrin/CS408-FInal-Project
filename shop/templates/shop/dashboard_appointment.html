@@ -65,5 +65,57 @@
     <button type="submit" class="btn btn-dark">Save changes</button>
     <a class="btn btn-outline-secondary ms-2" href="{% url 'dashboard_delete' appointment.pk %}">Delete appointment</a>
   </form>
+
+  <h2 class="h5 mt-5">Parts used</h2>
+  <p class="text-muted small">Parts are billed on services marked completed.</p>
+  {% if parts %}
+    <div class="table-responsive">
+      <table class="table align-middle">
+        <thead><tr><th>Service</th><th>Part</th><th class="text-end">Qty</th><th class="text-end">Each</th><th></th></tr></thead>
+        <tbody>
+          {% for part in parts %}
+            <tr>
+              <td>{{ part.appointment_service.service.name }}</td>
+              <td>{{ part.name }}</td>
+              <td class="text-end">{{ part.quantity }}</td>
+              <td class="text-end">${{ part.price }}</td>
+              <td class="text-end">
+                <form method="post" action="{% url 'dashboard_part_delete' part.pk %}">
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="text-muted">No parts recorded.</p>
+  {% endif %}
+
+  {% if part_form.fields.appointment_service.queryset.exists %}
+    <form method="post" action="{% url 'dashboard_part_add' appointment.pk %}" class="row g-2 align-items-end mb-4">
+      {% csrf_token %}
+      <div class="col-md-3"><label class="form-label small" for="{{ part_form.appointment_service.id_for_label }}">Service</label>{{ part_form.appointment_service }}</div>
+      <div class="col-md-3"><label class="form-label small" for="{{ part_form.name.id_for_label }}">Part</label>{{ part_form.name }}</div>
+      <div class="col-md-2"><label class="form-label small" for="{{ part_form.quantity.id_for_label }}">Qty</label>{{ part_form.quantity }}</div>
+      <div class="col-md-2"><label class="form-label small" for="{{ part_form.price.id_for_label }}">Price each ($)</label>{{ part_form.price }}</div>
+      <div class="col-md-2"><button type="submit" class="btn btn-outline-dark w-100">Add part</button></div>
+    </form>
+  {% else %}
+    <p class="text-muted">Add a service above before recording parts.</p>
+  {% endif %}
+
+  <h2 class="h5 mt-5">Invoice</h2>
+  {% if invoice %}
+    <p>
+      Total ${{ invoice.total }}
+      <span class="badge text-bg-{% if invoice.payment_status == 'paid' %}success{% else %}secondary{% endif %}">{{ invoice.get_payment_status_display }}</span>
+    </p>
+  {% else %}
+    <p class="text-muted">No invoice yet.</p>
+  {% endif %}
+  <a class="btn btn-dark" href="{% url 'dashboard_invoice' appointment.pk %}">{% if invoice %}View invoice{% else %}Create invoice{% endif %}</a>
 </div>
 {% endblock %}

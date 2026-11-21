@@ -1,0 +1,44 @@
+<h2 class="h5">Services</h2>
+{% if data.service_lines %}
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead><tr><th>Service</th><th class="text-end">Hours</th><th class="text-end">Amount</th></tr></thead>
+      <tbody>
+        {% for line in data.service_lines %}
+          <tr>
+            <td>{{ line.row.service.name }}{% if line.used_list_price %} <span class="text-muted small">(listed price)</span>{% endif %}</td>
+            <td class="text-end">{% if line.row.hours is not None %}{{ line.row.hours }}{% else %}-{% endif %}</td>
+            <td class="text-end">${{ line.amount }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="text-muted">No completed services yet.</p>
+{% endif %}
+
+{% if data.part_lines %}
+  <h2 class="h5 mt-4">Parts</h2>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead><tr><th>Part</th><th>For</th><th class="text-end">Qty</th><th class="text-end">Each</th><th class="text-end">Total</th></tr></thead>
+      <tbody>
+        {% for line in data.part_lines %}
+          <tr>
+            <td>{{ line.part.name }}</td><td>{{ line.service.name }}</td>
+            <td class="text-end">{{ line.part.quantity }}</td>
+            <td class="text-end">${{ line.part.price }}</td>
+            <td class="text-end">${{ line.line_total }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+
+<table class="table w-auto ms-auto mt-3">
+  <tr><td>Labor</td><td class="text-end">${{ labor }}</td></tr>
+  <tr><td>Parts</td><td class="text-end">${{ parts }}</td></tr>
+  <tr class="fw-bold fs-5"><td>Total</td><td class="text-end">${{ total }}</td></tr>
+</table>

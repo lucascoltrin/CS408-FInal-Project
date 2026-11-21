@@ -906,3 +906,362 @@ class LogoTests(TestCase):
             self.assertEqual(response.status_code, 200, name)
             self.assertEqual(response["Content-Type"], "image/png", name)
             response.close()
+
+
+# ---------------------------------------------------------------- Checkpoint 6
+
+from . import billing  # noqa: E402
+from .models import Invoice, PartUsed, Review  # noqa: E402
+
+
+def add_part(row, name="Filter", quantity=1, price="10.00"):
+    return PartUsed.objects.create(appointment_service=row, name=name, quantity=quantity, price=Decimal(price))
+
+
+class BillingTests(TestCase):
+    def setUp(self):
+        self.a = Service.objects.create(name="Svc A", description="a", price=Decimal("100.00"))
+        self.b = Service.objects.create(name="Svc B", description="b", price=Decimal("50.00"))
+        self.c = Service.objects.create(name="Svc C", description="c", price=Decimal("30.00"))
+        self.member = make_customer()
+        self.appt = make_booking(self.member, services=[self.a, self.b, self.c])
+        self.rows = {row.service_id: row for row in self.appt.appointment_services.all()}
+
+    def complete(self, service, cost=None):
+        row = self.rows[service.pk]
+        row.status, row.cost = "completed", cost
+        row.save()
+        return row
+
+    def test_totals_use_the_entered_cost_and_the_parts(self):
+        row = self.complete(self.a, Decimal("120.00"))
+        add_part(row, quantity=3, price="19.99")
+        data = billing.calculate(self.appt)
+        self.assertEqual(data["labor_total"], Decimal("120.00"))
+        self.assertEqual(data["parts_total"], Decimal("59.97"))
+        self.assertEqual(data["total"], Decimal("179.97"))
+
+    def test_blank_cost_bills_the_listed_price(self):
+        self.complete(self.b)
+        data = billing.calculate(self.appt)
+        self.assertEqual(data["labor_total"], Decimal("50.00"))
+        self.assertTrue(data["service_lines"][0]["used_list_price"])
+
+    def test_services_that_are_not_completed_are_not_billed(self):
+        self.complete(self.a, Decimal("100.00"))
+        add_part(self.rows[self.c.pk], price="500.00")  # part on an unfinished service
+        data = billing.calculate(self.appt)
+        self.assertEqual(data["total"], Decimal("100.00"))
+        self.assertEqual({r.service_id for r in data["skipped"]}, {self.b.pk, self.c.pk})
+
+    def test_generate_saves_an_invoice(self):
+        row = self.complete(self.a, Decimal("120.00"))
+        add_part(row, quantity=2, price="5.50")
+        invoice = billing.generate_invoice(self.appt)
+        self.assertEqual((invoice.labor_total, invoice.parts_total, invoice.total),
+                         (Decimal("120.00"), Decimal("11.00"), Decimal("131.00")))
+        self.assertEqual(invoice.payment_status, "unpaid")
+
+    def test_recalculating_updates_the_same_invoice_and_keeps_payment_status(self):
+        row = self.complete(self.a, Decimal("120.00"))
+        invoice = billing.generate_invoice(self.appt)
+        invoice.payment_status = "paid"
+        invoice.save()
+        row.cost = Decimal("140.00")
+        row.save()
+        again = billing.generate_invoice(self.appt)
+        self.assertEqual(Invoice.objects.count(), 1)
+        self.assertEqual((again.pk, again.total, again.payment_status), (invoice.pk, Decimal("140.00"), "paid"))
+
+    def test_nothing_completed_means_no_invoice(self):
+        self.assertIsNone(billing.generate_invoice(self.appt))
+        self.assertEqual(Invoice.objects.count(), 0)
+
+    def test_database_allows_only_one_invoice_per_appointment(self):
+        self.complete(self.a)
+        billing.generate_invoice(self.appt)
+        with self.assertRaises(_IntegrityError), transaction.atomic():
+            Invoice.objects.create(appointment=self.appt, labor_total=0, parts_total=0, total=0)
+
+    def test_out_of_date_detection(self):
+        row = self.complete(self.a, Decimal("100.00"))
+        invoice = billing.generate_invoice(self.appt)
+        self.assertFalse(billing.is_out_of_date(invoice, billing.calculate(self.appt)))
+        add_part(row, price="9.00")
+        self.assertTrue(billing.is_out_of_date(invoice, billing.calculate(self.appt)))
+
+
+class StaffInvoiceTests(StaffTestCase):
+    def setUp(self):
+        self.svc = Service.objects.create(name="Svc A", description="a", price=Decimal("80.00"))
+        self.member = make_customer()
+        self.appt = make_booking(self.member, services=[self.svc], status="approved")
+        self.row = self.appt.appointment_services.get()
+        self.url = f"/dashboard/appointments/{self.appt.pk}/invoice/"
+
+    def complete_row(self, cost="80.00"):
+        self.row.status, self.row.cost = "completed", Decimal(cost)
+        self.row.save()
+
+    def test_requires_staff(self):
+        self.assertRedirects(self.client.get(self.url), f"/staff/login/?next={self.url}")
+        self.client.post(self.url, {"action": "generate"})
+        self.assertEqual(Invoice.objects.count(), 0)
+
+    def test_preview_before_an_invoice_exists_and_viewing_creates_nothing(self):
+        self.staff_login()
+        self.complete_row()
+        response = self.client.get(self.url)
+        self.assertContains(response, "No invoice yet")
+        self.assertContains(response, "Create invoice")
+        self.assertEqual(Invoice.objects.count(), 0)
+
+    def test_generate_creates_the_invoice(self):
+        self.staff_login()
+        self.complete_row("95.00")
+        self.assertRedirects(self.client.post(self.url, {"action": "generate"}), self.url)
+        self.assertEqual(Invoice.objects.get().total, Decimal("95.00"))
+
+    def test_generate_with_nothing_completed_is_refused(self):
+        self.staff_login()
+        response = self.client.post(self.url, {"action": "generate"}, follow=True)
+        self.assertContains(response, "Mark at least one service as completed")
+        self.assertEqual(Invoice.objects.count(), 0)
+
+    def test_mark_paid_and_unpaid(self):
+        self.staff_login()
+        self.complete_row()
+        self.client.post(self.url, {"action": "generate"})
+        self.client.post(self.url, {"action": "mark_paid"})
+        self.assertEqual(Invoice.objects.get().payment_status, "paid")
+        self.client.post(self.url, {"action": "mark_unpaid"})
+        self.assertEqual(Invoice.objects.get().payment_status, "unpaid")
+
+    def test_mark_paid_without_an_invoice_does_nothing(self):
+        self.staff_login()
+        response = self.client.post(self.url, {"action": "mark_paid"}, follow=True)
+        self.assertContains(response, "There is no invoice yet.")
+
+    def test_unknown_action_rejected(self):
+        self.staff_login()
+        self.assertEqual(self.client.post(self.url, {"action": "explode"}).status_code, 400)
+
+    def test_warns_when_the_invoice_is_out_of_date(self):
+        self.staff_login()
+        self.complete_row("80.00")
+        self.client.post(self.url, {"action": "generate"})
+        self.assertNotContains(self.client.get(self.url), "out of date")
+        add_part(self.row, price="12.00")
+        self.assertContains(self.client.get(self.url), "out of date")
+
+
+class PartsTests(StaffTestCase):
+    def setUp(self):
+        self.svc = Service.objects.create(name="Svc A", description="a", price=Decimal("80.00"))
+        self.member = make_customer()
+        self.appt = make_booking(self.member, services=[self.svc])
+        self.row = self.appt.appointment_services.get()
+        self.other_row = make_booking(self.member, plate="OTHER1", services=[self.svc]).appointment_services.get()
+        self.url = f"/dashboard/appointments/{self.appt.pk}/parts/add/"
+        self.staff_login()
+
+    def payload(self, **overrides):
+        data = {"appointment_service": self.row.pk, "name": "Oil filter", "quantity": "2", "price": "7.25"}
+        data.update(overrides)
+        return data
+
+    def test_add_a_part(self):
+        response = self.client.post(self.url, self.payload(), follow=True)
+        part = PartUsed.objects.get()
+        self.assertEqual((part.name, part.quantity, part.price), ("Oil filter", 2, Decimal("7.25")))
+        self.assertContains(response, "Oil filter")
+
+    def test_bad_input_is_rejected_with_a_message(self):
+        for bad in [{"quantity": "0"}, {"price": "-1"}, {"name": ""}, {"quantity": "abc"}]:
+            response = self.client.post(self.url, self.payload(**bad), follow=True)
+            self.assertContains(response, "Part not added", msg_prefix=str(bad))
+        self.assertEqual(PartUsed.objects.count(), 0)
+
+    def test_cannot_attach_a_part_to_another_appointments_service(self):
+        response = self.client.post(self.url, self.payload(appointment_service=self.other_row.pk), follow=True)
+        self.assertContains(response, "Part not added")
+        self.assertEqual(PartUsed.objects.count(), 0)
+
+    def test_delete_a_part(self):
+        part = add_part(self.row)
+        response = self.client.post(f"/dashboard/parts/{part.pk}/delete/")
+        self.assertRedirects(response, f"/dashboard/appointments/{self.appt.pk}/")
+        self.assertEqual(PartUsed.objects.count(), 0)
+
+    def test_get_is_not_allowed(self):
+        part = add_part(self.row)
+        self.assertEqual(self.client.get(self.url).status_code, 405)
+        self.assertEqual(self.client.get(f"/dashboard/parts/{part.pk}/delete/").status_code, 405)
+
+    def test_requires_staff(self):
+        part = add_part(self.row)
+        self.client.post("/staff/logout/")
+        self.client.post(self.url, self.payload())
+        self.client.post(f"/dashboard/parts/{part.pk}/delete/")
+        self.assertEqual(PartUsed.objects.count(), 1)
+
+    def test_manage_page_shows_parts_and_invoice_link(self):
+        add_part(self.row, name="Spark plug")
+        response = self.client.get(f"/dashboard/appointments/{self.appt.pk}/")
+        self.assertContains(response, "Spark plug")
+        self.assertContains(response, f"/dashboard/appointments/{self.appt.pk}/invoice/")
+
+
+class CustomerInvoiceTests(TestCase):
+    def setUp(self):
+        self.svc = Service.objects.create(name="Svc A", description="a", price=Decimal("80.00"))
+        self.me = make_customer()
+        self.appt = make_booking(self.me, services=[self.svc], status="completed")
+        row = self.appt.appointment_services.get()
+        row.status, row.cost = "completed", Decimal("90.00")
+        row.save()
+        add_part(row, name="Brake pads", quantity=2, price="25.00")
+        self.invoice = billing.generate_invoice(self.appt)
+        self.url = f"/invoices/{self.invoice.pk}/"
+
+    def login(self, username="sam"):
+        self.client.post("/login/", {"username": username, "password": "correct-horse-1"})
+
+    def test_owner_sees_the_invoice(self):
+        self.login()
+        response = self.client.get(self.url)
+        for text in ["Svc A", "Brake pads", "$90.00", "$50.00", "$140.00", "Unpaid"]:
+            self.assertContains(response, text)
+
+    def test_other_customers_get_a_404(self):
+        make_customer("other")
+        self.login("other")
+        self.assertEqual(self.client.get(self.url).status_code, 404)
+
+    def test_guests_are_sent_to_login(self):
+        self.assertRedirects(self.client.get(self.url), f"/login/?next={self.url}")
+
+    def test_history_shows_the_total_status_and_link_to_the_owner(self):
+        self.login()
+        response = self.client.get("/history/")
+        self.assertContains(response, "$140.00")
+        self.assertContains(response, self.url)
+
+    def test_guest_lookup_shows_the_total_but_no_link(self):
+        guest = make_guest()
+        appt = make_booking(guest, plate="GUEST1", status="completed", services=[self.svc])
+        row = appt.appointment_services.get()
+        row.status = "completed"
+        row.save()
+        invoice = billing.generate_invoice(appt)
+        response = self.client.post("/history/", {"plate": "GUEST1", "phone": "555-010-0199"})
+        self.assertContains(response, "$80.00")
+        self.assertNotContains(response, f"/invoices/{invoice.pk}/")
+
+
+class ReviewModelTests(TestCase):
+    def test_display_name_hides_the_full_last_name(self):
+        self.assertEqual(Customer(name="Lucas Tuttle").display_name, "Lucas T.")
+        self.assertEqual(Customer(name="Mary Ann Smith").display_name, "Mary S.")
+        self.assertEqual(Customer(name="Cher").display_name, "Cher")
+        self.assertEqual(Customer(name="").display_name, "Customer")
+
+    def test_stars(self):
+        self.assertEqual(Review(rating=4).stars, "\u2605\u2605\u2605\u2605\u2606")
+
+    def test_who_may_review(self):
+        cases = [
+            ("completed", 0, 1), ("completed", -3, 1), ("approved", -3, 1), ("in_progress", -3, 1),
+            ("approved", 3, 0), ("pending", -3, 0), ("denied", -3, 0), ("completed", -3, 1),
+        ]
+        for i, (status, days, expected) in enumerate(cases):
+            customer = make_customer(f"user{i}")
+            make_booking(customer, date=future(days), status=status)
+            self.assertEqual(customer.reviews_remaining(), expected, (status, days))
+
+    def test_someone_elses_visit_does_not_count(self):
+        make_booking(make_customer("a"), date=future(-3), status="completed")
+        self.assertEqual(make_customer("b").reviews_remaining(), 0)
+
+
+class ReviewsPageTests(TestCase):
+    def setUp(self):
+        self.me = make_customer()
+        self.me.name = "Sam Jones"
+        self.me.save()
+
+    def login(self):
+        self.client.post("/login/", {"username": "sam", "password": "correct-horse-1"})
+
+    def visit(self, plate="ABC123", status="completed", days=-3):
+        return make_booking(self.me, plate=plate, date=future(days), status=status)
+
+    def post(self, **overrides):
+        data = {"rating": "5", "comment": "Great work."}
+        data.update(overrides)
+        return self.client.post("/reviews/", data)
+
+    def test_lists_reviews_with_first_name_last_initial_stars_and_average(self):
+        Review.objects.create(customer=self.me, rating=5, comment="Fantastic service.")
+        other = make_customer("other")
+        other.name = "Pat Lee"
+        other.save()
+        Review.objects.create(customer=other, rating=3, comment="Fine.")
+        response = self.client.get("/reviews/")
+        for text in ["Sam J.", "Pat L.", "Fantastic service.", "4.0 out of 5", "2 reviews", "\u2605\u2605\u2605\u2605\u2605"]:
+            self.assertContains(response, text)
+        self.assertNotContains(response, "Jones")
+        self.assertNotContains(response, "sam@example.com")
+
+    def test_empty_state(self):
+        self.assertContains(self.client.get("/reviews/"), "No reviews yet.")
+
+    def test_guest_sees_login_prompt_and_cannot_post(self):
+        self.assertContains(self.client.get("/reviews/"), "to leave a review")
+        self.assertRedirects(self.post(), "/login/?next=/reviews/")
+        self.assertEqual(Review.objects.count(), 0)
+
+    def test_customer_without_a_past_visit_cannot_review(self):
+        self.login()
+        self.visit(status="approved", days=5)
+        self.assertContains(self.client.get("/reviews/"), "once an appointment has taken place")
+        response = self.post()
+        self.assertRedirects(response, "/reviews/")
+        self.assertEqual(Review.objects.count(), 0)
+
+    def test_eligible_customer_can_post_a_review(self):
+        self.login()
+        self.visit()
+        self.assertContains(self.client.get("/reviews/"), "Post review")
+        self.assertRedirects(self.post(rating="4", comment="Quick and fair."), "/reviews/")
+        review = Review.objects.get()
+        self.assertEqual((review.customer, review.rating, review.comment), (self.me, 4, "Quick and fair."))
+        self.assertEqual(review.date, timezone.localdate())
+
+    def test_one_review_per_qualifying_visit(self):
+        self.login()
+        self.visit()
+        self.post()
+        self.post(comment="Second try.")
+        self.assertEqual(Review.objects.count(), 1)
+        self.assertNotContains(self.client.get("/reviews/"), "Post review")
+        self.visit(plate="XYZ789", days=-1)
+        self.post(comment="Second visit.")
+        self.assertEqual(Review.objects.count(), 2)
+
+    def test_invalid_reviews_are_rejected(self):
+        self.login()
+        self.visit()
+        for bad in [{"rating": "0"}, {"rating": "6"}, {"rating": "x"}, {"comment": ""}, {"comment": "   "}, {"comment": "a" * 1001}]:
+            response = self.post(**bad)
+            self.assertEqual(response.status_code, 200, str(bad)[:40])
+        self.assertEqual(Review.objects.count(), 0)
+
+    def test_review_text_is_escaped(self):
+        Review.objects.create(customer=self.me, rating=5, comment="<script>alert(1)</script>")
+        response = self.client.get("/reviews/")
+        self.assertContains(response, "&lt;script&gt;")
+        self.assertNotContains(response, "<script>alert(1)")
+
+    def test_navigation_links_to_reviews(self):
+        self.assertContains(self.client.get("/"), 'href="/reviews/"')

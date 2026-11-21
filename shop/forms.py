@@ -7,7 +7,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import (
-    GUEST_PREFIX, Appointment, AppointmentService, ContactMessage, Customer, Service, Vehicle,
+    GUEST_PREFIX, Appointment, AppointmentService, ContactMessage, Customer, PartUsed, Review, Service, Vehicle,
 )
 
 
@@ -248,3 +248,55 @@ class AppointmentEditForm(forms.Form):
             if service.pk not in have:
                 AppointmentService.objects.create(appointment=appointment, service=service)
         return appointment
+
+
+class ReviewForm(forms.ModelForm):
+    rating = forms.TypedChoiceField(
+        coerce=int, choices=[(5, "5 - Excellent"), (4, "4 - Good"), (3, "3 - Okay"), (2, "2 - Poor"), (1, "1 - Terrible")],
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    comment = forms.CharField(
+        max_length=1000, widget=forms.Textarea(attrs={"class": "form-control", "rows": 4}),
+    )
+
+    class Meta:
+        model = Review
+        fields = ["rating", "comment"]
+
+    def clean_comment(self):
+        comment = self.cleaned_data["comment"].strip()
+        if not comment:
+            raise forms.ValidationError("Write a few words about your visit.")
+        return comment
+
+
+class ServiceRowChoiceField(forms.ModelChoiceField):
+    def label_from_instance(self, obj):
+        return obj.service.name
+
+
+class PartUsedForm(forms.ModelForm):
+    """Staff enter parts by hand, since parts are supplied by the customer or mechanic."""
+
+    appointment_service = ServiceRowChoiceField(
+        queryset=AppointmentService.objects.none(), label="Service",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    name = forms.CharField(max_length=100, label="Part", widget=forms.TextInput(attrs={"class": "form-control"}))
+    quantity = forms.IntegerField(
+        min_value=1, max_value=999, initial=1, widget=forms.NumberInput(attrs={"class": "form-control", "min": "1"}),
+    )
+    price = forms.DecimalField(
+        min_value=0, max_digits=10, decimal_places=2, label="Price each ($)",
+        widget=forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0"}),
+    )
+
+    class Meta:
+        model = PartUsed
+        fields = ["appointment_service", "name", "quantity", "price"]
+
+    def __init__(self, *args, appointment, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["appointment_service"].queryset = (
+            appointment.appointment_services.select_related("service").order_by("id")
+        )

@@ -10,8 +10,9 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from .forms import LoginForm
-from .models import Appointment, AppointmentService, Employee
+from . import billing
+from .forms import LoginForm, PartUsedForm
+from .models import Appointment, AppointmentService, Employee, PartUsed
 from .staff_forms import AddServiceForm, AppointmentStaffForm, ServiceRowFormSet
 from .views import _safe_next
 
@@ -128,6 +129,10 @@ def dashboard_appointment(request, pk):
     return render(request, "shop/dashboard_appointment.html", {
         "appointment": appointment, "customer": appointment.vehicle.customer,
         "form": form, "formset": formset, "add_form": add_form,
+        "parts": PartUsed.objects.filter(appointment_service__appointment=appointment)
+        .select_related("appointment_service__service").order_by("id"),
+        "part_form": PartUsedForm(appointment=appointment),
+        "invoice": appointment.invoices.first(),
     })
 
 
@@ -140,3 +145,58 @@ def dashboard_delete(request, pk):
         messages.success(request, f"Deleted the appointment for {label}.")
         return redirect("dashboard")
     return render(request, "shop/dashboard_delete.html", {"appointment": appointment})
+
+
+@staff_required
+@require_POST
+def dashboard_part_add(request, pk):
+    appointment = get_object_or_404(Appointment, pk=pk)
+    form = PartUsedForm(request.POST, appointment=appointment)
+    if form.is_valid():
+        part = form.save()
+        messages.success(request, f"Added {part.quantity} x {part.name}.")
+    else:
+        problems = "; ".join(
+            f"{form.fields[field].label or field}: {' '.join(errors)}" for field, errors in form.errors.items()
+        )
+        messages.error(request, f"Part not added. {problems}")
+    return redirect("dashboard_appointment", pk=appointment.pk)
+
+
+@staff_required
+@require_POST
+def dashboard_part_delete(request, pk):
+    part = get_object_or_404(PartUsed.objects.select_related("appointment_service"), pk=pk)
+    appointment_id = part.appointment_service.appointment_id
+    part.delete()
+    messages.success(request, "Part removed.")
+    return redirect("dashboard_appointment", pk=appointment_id)
+
+
+@staff_required
+def dashboard_invoice(request, pk):
+    appointment = get_object_or_404(Appointment.objects.select_related("vehicle__customer"), pk=pk)
+    invoice = appointment.invoices.first()
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "generate":
+            invoice = billing.generate_invoice(appointment)
+            if invoice is None:
+                messages.error(request, "Mark at least one service as completed before creating an invoice.")
+            else:
+                messages.success(request, f"Invoice total: ${invoice.total}.")
+        elif action in ("mark_paid", "mark_unpaid"):
+            if invoice is None:
+                messages.error(request, "There is no invoice yet.")
+            else:
+                invoice.payment_status = "paid" if action == "mark_paid" else "unpaid"
+                invoice.save(update_fields=["payment_status"])
+                messages.success(request, f"Marked {invoice.get_payment_status_display().lower()}.")
+        else:
+            return HttpResponseBadRequest("Unknown action.")
+        return redirect("dashboard_invoice", pk=appointment.pk)
+    data = billing.calculate(appointment)
+    return render(request, "shop/dashboard_invoice.html", {
+        "appointment": appointment, "customer": appointment.vehicle.customer, "invoice": invoice, "data": data,
+        "out_of_date": invoice is not None and billing.is_out_of_date(invoice, data),
+    })

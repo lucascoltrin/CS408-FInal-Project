@@ -23,6 +23,7 @@
             <li class="nav-item"><a class="nav-link {% if request.path == '/book/' %}active{% endif %}" href="{% url 'book' %}">Book an Appointment</a></li>
             <li class="nav-item"><a class="nav-link {% if request.path == '/history/' %}active{% endif %}" href="{% url 'history' %}">Service History</a></li>
             <li class="nav-item"><a class="nav-link {% if request.path == '/services/' %}active{% endif %}" href="{% url 'services' %}">Services &amp; Pricing</a></li>
+            <li class="nav-item"><a class="nav-link {% if request.path == '/reviews/' %}active{% endif %}" href="{% url 'reviews' %}">Reviews</a></li>
             <li class="nav-item"><a class="nav-link {% if request.path == '/about/' %}active{% endif %}" href="{% url 'about' %}">About &amp; Contact</a></li>
             {% if current_employee %}
               <li class="nav-item"><a class="nav-link {% if '/dashboard/' in request.path %}active{% endif %}" href="{% url 'dashboard' %}">Dashboard</a></li>
@@ -76,6 +77,7 @@
         <a class="link-light" href="{% url 'home' %}">Home</a> &middot;
         <a class="link-light" href="{% url 'book' %}">Book an Appointment</a> &middot;
         <a class="link-light" href="{% url 'history' %}">Service History</a> &middot;
+        <a class="link-light" href="{% url 'reviews' %}">Reviews</a> &middot;
         <a class="link-light" href="{% url 'services' %}">Services &amp; Pricing</a> &middot;
         <a class="link-light" href="{% url 'about' %}">About &amp; Contact</a>
       </div>
